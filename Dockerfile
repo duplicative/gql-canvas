@@ -11,9 +11,6 @@ RUN npm install
 # Copy the rest of the application source code
 COPY . .
 
-# Generate wrangler types
-RUN npx wrangler types
-
 # Build the application
 RUN npm run build
 
@@ -25,13 +22,12 @@ WORKDIR /app
 # Copy built assets from the builder stage
 COPY --from=builder /app/dist ./dist
 COPY package.json .
-COPY wrangler.jsonc .
 
 # Install dependencies
 RUN npm install
 
-# Expose the port wrangler dev runs on
-EXPOSE 8787
+# Expose the port vite runs on
+EXPOSE 3000
 
-# Start the worker
-CMD ["npx", "wrangler", "dev", "--ip", "0.0.0.0"]
+# Start the dev server
+CMD ["npx", "vite", "dev", "--host", "0.0.0.0", "--port", "3000"]
