@@ -1,5 +1,6 @@
-import { parse, DocumentNode, OperationDefinitionNode, SelectionNode, FieldNode, InlineFragmentNode, FragmentSpreadNode, FragmentDefinitionNode } from 'graphql';
-import { GraphQLNode } from '@/shared/types';
+import { parse } from 'graphql';
+import type { DocumentNode, OperationDefinitionNode, SelectionNode, FieldNode, InlineFragmentNode, FragmentSpreadNode, FragmentDefinitionNode } from 'graphql';
+import type { GraphQLNode } from '@/shared/types';
 
 let nodeIdCounter = 0;
 let fragmentDefinitions: { [key: string]: FragmentDefinitionNode } = {};
