@@ -35,85 +35,87 @@ export default function GraphVisualization({ rootNode, onNodeUpdate, onQueryChan
     // Container for the graph
     const container = svg.append('g');
 
-    // Create hierarchy
+    // Create hierarchy and extract nodes and links
     const hierarchy = d3.hierarchy(rootNode);
-    const treeLayout = d3.tree<GraphQLNode>().size([height - 100, width - 300]);
-    const treeData = treeLayout(hierarchy);
-
-    // Apply additional spacing between levels
-    const levelSpacing = 180; // Increased spacing between levels
-    treeData.descendants().forEach(d => {
-      d.y = d.depth * levelSpacing;
-    });
-
-    // Position variables nodes independently (floating near operation node)
-    const variablesNodes = treeData.descendants().filter((d: any) => d.data.type === 'variables');
-    variablesNodes.forEach((d: any, index: number) => {
-      d.y = 20; // Position close to the operation node
-      d.x = d.x - 80 - (index * 60); // Offset above the operation node, with spacing for multiple variables nodes
-    });
-
-    // Filter out links that involve variables nodes
-    const filteredLinks = treeData.links().filter((link: any) => 
+    const nodes = hierarchy.descendants() as d3.HierarchyPointNode<GraphQLNode>[];
+    const links = hierarchy.links().filter((link: any) =>
       link.source.data.type !== 'variables' && link.target.data.type !== 'variables'
     );
 
-    // Draw links
-    const linkGenerator = d3.linkHorizontal<any, any>()
-      .x((d: any) => d.y + 120)
-      .y((d: any) => d.x + 50);
+    // Node dimensions needed for collision detection and layout
+    const getNodeDimensions = (d: any) => {
+      if (d.data.type === 'variables' && d.data.variables) {
+        const lines = [d.data.name, ...Object.entries(d.data.variables).map(([key, value]) => `${key}: ${value}`)];
+        const maxLength = Math.max(...lines.map(line => line.length));
+        const width = Math.max(120, maxLength * 6 + 20);
+        const height = Math.max(40, lines.length * 16 + 10);
+        return { width, height };
+      }
+      const width = Math.max(80, d.data.name.length * 8 + 20);
+      const height = 40;
+      return { width, height };
+    };
 
-    container.selectAll('.link')
-      .data(filteredLinks)
+    // Force simulation
+    const simulation = d3.forceSimulation(nodes as any)
+      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(120).strength(0.5))
+      .force('charge', d3.forceManyBody().strength(-400))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collide', d3.forceCollide().radius((d: any) => {
+        const { width, height } = getNodeDimensions(d);
+        return Math.max(width, height) / 2 + 10; // Add padding
+      }).strength(0.9));
+
+    // Draw links
+    const link = container.selectAll('.link')
+      .data(links)
       .enter()
       .append('path')
       .attr('class', 'link')
-      .attr('d', linkGenerator)
       .attr('fill', 'none')
       .attr('stroke', '#94a3b8')
       .attr('stroke-width', 2);
 
     // Draw nodes
     const nodeGroup = container.selectAll('.node')
-      .data(treeData.descendants())
+      .data(nodes)
       .enter()
       .append('g')
-      .attr('class', 'node')
-      .attr('transform', (d: any) => `translate(${d.y + 120},${d.x + 50})`);
+      .attr('class', 'node');
 
-    // Node shapes - larger to contain text, adjust for variables
+    // Drag functionality
+    const drag = (simulation: d3.Simulation<any, any>) => {
+      function dragstarted(event: any, d: any) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+
+      function dragged(event: any, d: any) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
+
+      function dragended(event: any, d: any) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }
+
+      return d3.drag()
+          .on('start', dragstarted)
+          .on('drag', dragged)
+          .on('end', dragended);
+    }
+
+    nodeGroup.call(drag(simulation as any) as any);
+
+    // Node shapes
     nodeGroup.append('rect')
-      .attr('width', (d: any) => {
-        if (d.data.type === 'variables' && d.data.variables) {
-          // Calculate width based on longest line
-          const lines = [d.data.name, ...Object.entries(d.data.variables).map(([key, value]) => `${key}: ${value}`)];
-          const maxLength = Math.max(...lines.map(line => line.length));
-          return Math.max(120, maxLength * 6 + 20);
-        }
-        return Math.max(80, d.data.name.length * 8 + 20);
-      })
-      .attr('height', (d: any) => {
-        if (d.data.type === 'variables' && d.data.variables) {
-          const lineCount = 1 + Object.keys(d.data.variables).length;
-          return Math.max(40, lineCount * 16 + 10);
-        }
-        return 40;
-      })
-      .attr('x', (d: any) => {
-        if (d.data.type === 'variables' && d.data.variables) {
-          const lines = [d.data.name, ...Object.entries(d.data.variables).map(([key, value]) => `${key}: ${value}`)];
-          const maxLength = Math.max(...lines.map(line => line.length));
-          return -Math.max(60, maxLength * 3 + 10);
-        }
-        return -Math.max(40, d.data.name.length * 4 + 10);
-      })
-      .attr('y', (d: any) => {
-        if (d.data.type === 'variables' && d.data.variables) {
-          const lineCount = 1 + Object.keys(d.data.variables).length;
-          return -Math.max(20, (lineCount * 16 + 10) / 2);
-        }
-        return -20;
-      })
+      .attr('width', d => getNodeDimensions(d).width)
+      .attr('height', d => getNodeDimensions(d).height)
+      .attr('x', d => -getNodeDimensions(d).width / 2)
+      .attr('y', d => -getNodeDimensions(d).height / 2)
       .attr('rx', 8)
       .attr('ry', 8)
       .attr('fill', (d: any) => {
@@ -128,25 +130,21 @@ export default function GraphVisualization({ rootNode, onNodeUpdate, onQueryChan
       .attr('stroke', '#fff')
       .attr('stroke-width', 2);
 
-    // Node name labels - handle multi-line text for variables
+    // Node labels
     nodeGroup.each(function(d: any) {
       const group = d3.select(this);
+      const { height } = getNodeDimensions(d);
       
       if (d.data.type === 'variables' && d.data.variables) {
-        // Multi-line text for variables
-        const lines = [d.data.name];
-        Object.entries(d.data.variables).forEach(([key, value]) => {
-          lines.push(`${key}: ${value}`);
-        });
-        
-        // Adjust node height for multiple lines
-        group.select('rect')
-          .attr('height', Math.max(40, lines.length * 16 + 10));
-        
+        const lines = [d.data.name, ...Object.entries(d.data.variables).map(([key, value]) => `${key}: ${value}`)];
+        const lineHeight = 14;
+        const totalTextHeight = lines.length * lineHeight;
+        const startY = -totalTextHeight / 2 + lineHeight / 2;
+
         lines.forEach((line, index) => {
           group.append('text')
             .attr('x', 0)
-            .attr('y', -8 + (index * 14))
+            .attr('y', startY + index * lineHeight)
             .attr('text-anchor', 'middle')
             .attr('font-size', index === 0 ? '12px' : '10px')
             .attr('font-weight', index === 0 ? '600' : '400')
@@ -155,7 +153,6 @@ export default function GraphVisualization({ rootNode, onNodeUpdate, onQueryChan
             .text(line);
         });
       } else {
-        // Single line text for other nodes
         group.append('text')
           .attr('x', 0)
           .attr('y', -4)
@@ -165,95 +162,96 @@ export default function GraphVisualization({ rootNode, onNodeUpdate, onQueryChan
           .attr('font-family', 'Inter, sans-serif')
           .attr('fill', '#fff')
           .text(d.data.name);
+
+        group.append('text')
+          .attr('x', 0)
+          .attr('y', 10)
+          .attr('text-anchor', 'middle')
+          .attr('font-size', '10px')
+          .attr('font-family', 'Inter, sans-serif')
+          .attr('fill', '#ffffff')
+          .attr('opacity', 0.8)
+          .text(d.data.type);
       }
     });
 
-    // Node type labels
-    nodeGroup.append('text')
-      .attr('x', 0)
-      .attr('y', 10)
-      .attr('text-anchor', 'middle')
-      .attr('font-size', '10px')
-      .attr('font-family', 'Inter, sans-serif')
-      .attr('fill', '#ffffff')
-      .attr('opacity', 0.8)
-      .text((d: any) => d.data.type);
+    // UI elements like buttons, indicators
+    nodeGroup.each(function(d: any) {
+      const group = d3.select(this);
+      const { width, height } = getNodeDimensions(d);
 
-    // Arguments indicator
-    nodeGroup
-      .filter((d: any) => d.data.arguments && Object.keys(d.data.arguments).length > 0)
-      .append('circle')
-      .attr('r', 4)
-      .attr('cx', (d: any) => Math.max(40, d.data.name.length * 4 + 10) - 8)
-      .attr('cy', -12)
-      .attr('fill', '#8b5cf6')
-      .attr('stroke', '#fff')
-      .attr('stroke-width', 1)
-      .append('title')
-      .text((d: any) => {
-        const args = d.data.arguments;
-        return Object.entries(args).map(([key, value]) => `${key}: ${value}`).join('\n');
-      });
+      // Arguments indicator
+      if (d.data.arguments && Object.keys(d.data.arguments).length > 0) {
+        group.append('circle')
+          .attr('r', 4)
+          .attr('cx', width / 2 - 8)
+          .attr('cy', -height / 2 + 8)
+          .attr('fill', '#8b5cf6')
+          .attr('stroke', '#fff')
+          .attr('stroke-width', 1)
+          .append('title')
+          .text(() => Object.entries(d.data.arguments).map(([key, value]) => `${key}: ${value}`).join('\n'));
+      }
 
-    // Delete button
-    const deleteButton = nodeGroup
-      .filter((d: any) => d.data.type !== 'operation')
-      .append('g')
-      .attr('class', 'delete-button')
-      .style('opacity', 0)
-      .style('cursor', 'pointer');
+      // Delete button
+      if (d.data.type !== 'operation') {
+        const deleteButton = group.append('g')
+          .attr('class', 'delete-button')
+          .style('opacity', 0)
+          .style('cursor', 'pointer')
+          .on('click', (event) => {
+            event.stopPropagation();
+            const updatedNode = deleteNodeById(rootNode, d.data.id);
+            if (updatedNode) {
+              onNodeUpdate(updatedNode);
+              onQueryChange(graphQLNodeToQuery(updatedNode));
+            }
+          });
 
-    deleteButton.append('circle')
-      .attr('r', 8)
-      .attr('cx', (d: any) => Math.max(40, d.data.name.length * 4 + 10) - 8)
-      .attr('cy', 12)
-      .attr('fill', '#ef4444')
-      .attr('stroke', '#fff')
-      .attr('stroke-width', 1);
+        deleteButton.append('circle')
+          .attr('r', 8)
+          .attr('cx', width / 2 - 8)
+          .attr('cy', height / 2 - 8)
+          .attr('fill', '#ef4444');
 
-    deleteButton.append('text')
-      .attr('x', (d: any) => Math.max(40, d.data.name.length * 4 + 10) - 8)
-      .attr('y', 16)
-      .attr('text-anchor', 'middle')
-      .attr('font-size', '10px')
-      .attr('fill', 'white')
-      .text('×');
+        deleteButton.append('text')
+          .attr('x', width / 2 - 8)
+          .attr('y', height / 2 - 4)
+          .attr('text-anchor', 'middle')
+          .attr('font-size', '10px')
+          .attr('fill', 'white')
+          .text('×');
+      }
+    });
 
-    // Hover effects
+    // Hover and click effects
     nodeGroup
       .on('mouseenter', function() {
         d3.select(this).select('.delete-button').style('opacity', 1);
       })
       .on('mouseleave', function() {
         d3.select(this).select('.delete-button').style('opacity', 0);
-      });
-
-    // Double-click to edit
-    nodeGroup
-      .style('cursor', 'pointer')
-      .on('dblclick', (_, d: any) => {
+      })
+      .on('dblclick', (event, d: any) => {
+        event.stopPropagation();
         setEditingNodeId(d.data.id);
         setEditingValue(d.data.name);
       });
 
-    // Delete functionality
-    deleteButton.on('click', (_, d: any) => {
-      const updatedNode = deleteNodeById(rootNode, d.data.id);
-      if (updatedNode) {
-        onNodeUpdate(updatedNode);
-        onQueryChange(graphQLNodeToQuery(updatedNode));
-      }
+    // Simulation tick function
+    simulation.on('tick', () => {
+      link
+        .attr('d', d3.linkHorizontal()
+          .x((d: any) => d.x)
+          .y((d: any) => d.y) as any);
+
+      nodeGroup
+        .attr('transform', (d: any) => `translate(${d.x},${d.y})`);
     });
 
-    // Center the graph
-    const bbox = container.node()?.getBBox();
-    if (bbox) {
-      const scale = Math.min(width / (bbox.width + 100), height / (bbox.height + 100), 1);
-      const centerX = width / 2 - (bbox.x + bbox.width / 2) * scale;
-      const centerY = height / 2 - (bbox.y + bbox.height / 2) * scale;
-      
-      svg.call(zoom.transform, d3.zoomIdentity.translate(centerX, centerY).scale(scale));
-    }
+    // Initial zoom and center
+    const initialTransform = d3.zoomIdentity.translate(width / 2, height / 2).scale(0.8);
+    svg.call(zoom.transform, initialTransform);
 
   }, [rootNode, onNodeUpdate, onQueryChange]);
 
